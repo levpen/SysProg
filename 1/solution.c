@@ -21,25 +21,17 @@ static int *data_merge(int *arr1, int sz1, int *arr2, int sz2)
 	while (i < sz1 && j < sz2)
 	{
 		if (arr1[i] <= arr2[j])
-		{
 			rez[k] = arr1[i++];
-		}
 		else
-		{
 			rez[k] = arr2[j++];
-		}
 		++k;
 	}
 
 	while (i < sz1)
-	{
 		rez[k++] = arr1[i++];
-	}
 
 	while (j < sz2)
-	{
 		rez[k++] = arr2[j++];
-	}
 
 	return rez;
 }
@@ -66,30 +58,23 @@ static void merge(int *arr, int l, int m, int r)
 	while (i < n1 && j < n2)
 	{
 		if (L[i] <= R[j])
-		{
 			arr[k] = L[i++];
-		}
 		else
-		{
 			arr[k] = R[j++];
-		}
 		k++;
 
-		//printf("yield\n");
 		coro_yield(); // yield after every cycle iteration
 	}
 
 	while (i < n1)
 	{
 		arr[k++] = L[i++];
-		//printf("yield\n");
 		coro_yield(); // yield after every cycle iteration
 	}
 
 	while (j < n2)
 	{
 		arr[k++] = R[j++];
-		//printf("yield\n");
 		coro_yield(); // yield after every cycle iteration
 	}
 }
@@ -140,15 +125,14 @@ coroutine_func_f(void *context)
 	int *arr = ((struct Context *)context)->arr;
 
 	//printf("Started coroutine %s\n", name);
-	
-	// (*this).work_time += time_diff(&start, &stop);
+
 	mergeSort(arr, l, r);
 
 	// printf("%s: switch count %lld\n", name, coro_switch_count(this));
 	// other_function(name, 1);
 	// printf("%s: switch count after other function %lld\n", name,
 	//        coro_switch_count(this));
-	printf("%s finished: switch count %lld, work time: %lf\n", name, coro_switch_count(this), coro_work_time(this));
+	printf("%s finished: switch count %lld, ", name, coro_switch_count(this));
 
 	free(name);
 	/* This will be returned from coro_status(). */
@@ -169,7 +153,6 @@ int main(int argc, char **argv)
 	for (int i = 0; i < n; ++i)
 	{
 		files[i] = fopen(argv[i + 2], "r");
-		//printf("File %s opened\n", argv[i + 1]);
 		if (files[i] == NULL)
 		{
 			printf("Error: no such file exists");
@@ -221,6 +204,7 @@ int main(int argc, char **argv)
 		 * example. Don't forget to free the coroutine afterwards.
 		 */
 		free(coro_status(c));
+		printf("work time: %lf\n", coro_work_time(c));
 		coro_delete(c);
 	}
 	free(conarr);
@@ -230,9 +214,6 @@ int main(int argc, char **argv)
 	for (int i = 0; i < n - 1; ++i)
 	{
 		int *tmp = data_merge(data[i], sizes[i], data[i + 1], sizes[i + 1]);
-		// for(int j = 0; j < sizes[i]+sizes[i+1]; ++j)
-		// 	printf("%d ", tmp[j]);
-		// printf("\n");
 		free(data[i]);
 		free(data[i + 1]);
 		data[i + 1] = tmp;
@@ -247,7 +228,6 @@ int main(int argc, char **argv)
 	free(data);
 	free(sizes);
 	clock_gettime(CLOCK_MONOTONIC, &stop);
-	double accum = time_diff(&start, &stop);
-	printf("Full work time: %lf\n", accum);
+	printf("Full work time: %lf\n", time_diff(&start, &stop));
 	return 0;
 }
