@@ -11,14 +11,6 @@
  * $> ./a.out
  */
 
-struct Context
-{
-	int *arr;
-	int l;
-	int r;
-	char *name;
-};
-
 static int *data_merge(int *arr1, int sz1, int *arr2, int sz2)
 {
 	int i = 0;
@@ -167,7 +159,8 @@ int main(int argc, char **argv)
 {
 	struct timespec start, stop;
 	clock_gettime(CLOCK_MONOTONIC, &start);
-	int n = argc - 1;
+	int n = argc - 2;
+	double target_latency = (double)atoi(argv[1])/1000000.0;
 	/* Data initialization */
 	FILE **files = (FILE **)malloc((n) * sizeof(FILE *));
 	int **data = (int **)malloc((n) * sizeof(int *));
@@ -175,7 +168,7 @@ int main(int argc, char **argv)
 	/* Reading data from files */
 	for (int i = 0; i < n; ++i)
 	{
-		files[i] = fopen(argv[i + 1], "r");
+		files[i] = fopen(argv[i + 2], "r");
 		//printf("File %s opened\n", argv[i + 1]);
 		if (files[i] == NULL)
 		{
@@ -215,6 +208,7 @@ int main(int argc, char **argv)
 		conarr[i]->name = strdup(name);
 		conarr[i]->l = 0;
 		conarr[i]->r = sizes[i] - 1;
+		conarr[i]->coro_time_frame = target_latency/(double)n;
 		coro_new(coroutine_func_f, conarr[i]);
 	}
 	/* Wait for all the coroutines to end. */

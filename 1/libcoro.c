@@ -29,6 +29,8 @@ struct coro {
 	/** True, if the coroutine has finished. */
 	bool is_finished;
 	long long switch_count;
+	/** +5 points: each of N coroutines is given T / N microseconds, where T - target latency */
+	double time_frame;
 	/** Links in the coroutine list, used by scheduler. */
 	struct coro *next, *prev;
 };
@@ -113,9 +115,13 @@ static void
 coro_yield_to(struct coro *to)
 {
 	struct coro *from = coro_this_ptr;
-	++from->switch_count;
 	clock_gettime(CLOCK_MONOTONIC, &from->stop);
-	from->work_time += time_diff(&from->start, &from->stop);
+	double cur_time_diff = time_diff(&from->start, &from->stop);
+	// Checking if we exceeding the time frame for current coro
+	if(cur_time_diff < from->time_frame)
+		return;
+	++from->switch_count;
+	from->work_time += cur_time_diff;
 	if (sigsetjmp(from->ctx, 0) == 0){
 		clock_gettime(CLOCK_MONOTONIC, &to->start);
 		siglongjmp(to->ctx, 1);
@@ -212,6 +218,7 @@ coro_new(coro_f func, void *func_arg)
 	c->stack = malloc(stack_size);
 	c->func = func;
 	c->func_arg = func_arg;
+	c->time_frame = ((struct Context*)func_arg)->coro_time_frame;
 	c->is_finished = false;
 	c->switch_count = 0;
 	/*

@@ -5,6 +5,16 @@
 struct coro;
 typedef void* (*coro_f)(void *);
 
+/** Context structure for func_agrs and context*/
+struct Context
+{
+	double coro_time_frame;
+	int *arr;
+	int l;
+	int r;
+	char *name;
+};
+
 /** Make current context scheduler. */
 void
 coro_sched_init(void);
