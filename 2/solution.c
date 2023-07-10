@@ -4,26 +4,38 @@
 #include <unistd.h>
 #include <sys/wait.h>
 #include <fcntl.h>
+#include <signal.h>
 #include "parser.h"
 
-int spawn_proc(int in, int out, cmd *command)
+// void child_handler(int sig) {
+//     printf("SIG %d\n", sig);
+//     int status = 0;
+//     waitpid(-1, &status, 0);
+//     printf("STATUS: %d\n", status);
+//     printf("WEXITSTATUS: %d\n", WEXITSTATUS(status));
+//     // _exit(status);
+// }
+
+// returns not 0 if we should exit or something went wrong
+int spawn_proc(int in, int out, cmd *command, int *exit_code, pid_t *child_pid)
 {
+    if (strcmp(command->name, "exit") == 0)
+    {
+        *exit_code = atoi(command->args);
+    }
     if (strcmp(command->name, "exit") == 0 && command->pipe == NOPIPE && in == 0)
     {
-        int err = atoi(command->args);
-        if (!err)
-            err = -1;
-        // printf("%d\n", err);
-        return err;
+        *exit_code = atoi(command->args);
+        // printf("%d\n", exit_code);
+        return 1;
     }
     if (strcmp(command->name, "cd") == 0 && command->pipe == NOPIPE && in == 0)
     {
-        chdir(command->args);
+        *exit_code = chdir(command->args);
         return 0;
     }
 
-    pid_t pid;
-    if ((pid = fork()) == 0)
+    if ((*child_pid = fork()) == 0)
     {
         if (in != 0)
         {
@@ -37,34 +49,31 @@ int spawn_proc(int in, int out, cmd *command)
             close(out);
         }
 
-        return execl("/bin/bash", "bash", "-c", command->full_cmd, NULL);
+        execl("/bin/bash", "bash", "-c", command->full_cmd, NULL);
     }
     return 0;
 }
 
-int execCmds(cmd **cmds, int n)
+int execCmds(cmd **cmds, int n, int *exit_code)
 {
-    int in, fd[2];
-    in = 0;
+    int in = 0, fd[2];
     int error_code = 0;
+    pid_t *childs = malloc(sizeof(pid_t) * n);
     for (int i = 0; i < n; ++i)
     {
         int file = 0;
         if (cmds[i]->pipe == AND || cmds[i]->pipe == OR || i == n - 1)
         {
             int status;
-            error_code = spawn_proc(in, 1, cmds[i]);
-            while (wait(&status) > 0)
-                ;
+            error_code = spawn_proc(in, 1, cmds[i], exit_code, &childs[i]);
+            wait(&status);
             if (cmds[i]->pipe == OR && status == 0)
             {
                 while (cmds[i]->pipe == OR)
                     ++i;
             }
             else if (cmds[i]->pipe == AND && status)
-            {
                 return 0;
-            }
         }
         else
         {
@@ -87,38 +96,74 @@ int execCmds(cmd **cmds, int n)
                 else if (cmds[i]->pipe == DARROW)
                     file = open(file_desc, O_CREAT | O_WRONLY | O_APPEND);
                 // printf("FD: %d. %s\n", file, file_desc);
-                error_code = spawn_proc(in, file, cmds[i++]);
+                error_code = spawn_proc(in, file, cmds[i], exit_code, &childs[i]);
                 free(file_desc);
+                ++i;
             }
             else
             {
-                error_code = spawn_proc(in, fd[1], cmds[i]);
+                error_code = spawn_proc(in, fd[1], cmds[i], exit_code, &childs[i]);
             }
             close(fd[1]);
             in = fd[0];
-        }
 
-        // wait(NULL);
-        // printf("CHILD_PID: %d\n", child_pid);
-        // printf("STATUS: %d\n", status);
+            if (cmds[i]->pipe != PIPE)
+            {
+                int status;
+                wait(&status);
+                if (WIFEXITED(status))
+                {
+                    *exit_code = WEXITSTATUS(status);
+                }
+                else
+                {
+                    *exit_code = WTERMSIG(status);
+                }
+            }
+        }
 
         if (file)
-        {
             close(file);
-        }
 
         if (error_code)
         {
+            free(childs);
             return error_code;
         }
     }
+
+    for (int i = 0; i < n; ++i)
+    {
+        int status = 0;
+        waitpid(childs[i], &status, 0);
+        
+        // if(ans > 0) {
+        //     if (WIFEXITED(status)) {
+        //         *exit_code = WEXITSTATUS(status);
+        //     } else {
+        //         *exit_code = WTERMSIG(status);
+        //     }
+        // }
+        // }
+
+        // printf("STATUS: %d\n", status);
+        // printf("PID: %d\n", childs[i]);
+        // printf("ANS: %d\n", ans);
+        // printf("WIFEXITED(status): %d\n", WIFEXITED(status));
+        // printf("WEXITSTATUS: %d\n", WEXITSTATUS(status));
+        // printf("WTERMSIG: %d\n", WTERMSIG(status));
+        // printf("EXIT_CODE: %d\n", *exit_code);
+    }
+    free(childs);
     return 0;
 }
 
 int main()
 {
     char *str = '\0';
-    // FILE *f = fopen("test.txt", "r");
+    int exit_code = 0;
+    // signal( SIGCHLD, SIG_IGN);
+
     while (1)
     {
         // printf("$> ");
@@ -129,10 +174,8 @@ int main()
         // printf("%d\n", rez);
         // printf("%d\n", n);
         cmd **cmds = parseString(str, n);
-        int err = 0;
-        err = execCmds(cmds, n);
-        while (wait(NULL) > 0)
-            ;
+        int err = execCmds(cmds, n, &exit_code);
+
         for (int i = 0; i < n; ++i)
         {
             // printCmd(cmds[i]);
@@ -140,14 +183,11 @@ int main()
         }
         free(cmds);
         free(str);
-        // break;
         if (err || rez == -1)
         {
-            if (err == -1)
-                err = 0;
-            exit(err);
+            break;
         }
     }
 
-    return 0;
+    return exit_code;
 }
