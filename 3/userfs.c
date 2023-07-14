@@ -45,6 +45,7 @@ struct file {
 	/* PUT HERE OTHER MEMBERS */
 	char deleted;
 	size_t size;
+	size_t total_size;
 };
 
 /** List of all files. */
@@ -73,6 +74,10 @@ enum ufs_error_code
 ufs_errno()
 {
 	return ufs_error_code;
+}
+
+static inline char check_fd(int fd) {
+	return fd < 0 || fd >= file_descriptor_capacity || file_descriptors[fd] == NULL;
 }
 
 /**
@@ -113,6 +118,7 @@ static struct file * create_empty_file(const char *filename) {
 	f->prev = NULL;
 	f->deleted = 0;
 	f->size = 0;
+	f->total_size = 0;
 	return f;
 }
 
@@ -182,7 +188,7 @@ ufs_open(const char *filename, int flags)
 ssize_t
 ufs_write(int fd, const char *buf, size_t size)
 {
-	if(fd < 0 || fd >= file_descriptor_capacity || file_descriptors[fd] == NULL) {
+	if(check_fd(fd)) {
 		ufs_error_code = UFS_ERR_NO_FILE;
 		return -1;
 	}
@@ -202,7 +208,10 @@ ufs_write(int fd, const char *buf, size_t size)
 	struct block *cur_b = file_descriptors[fd]->last_block;
 	int buf_shift = 0;
 	while(size) {
-		if(cur_b->memory == NULL) cur_b->memory = malloc(BLOCK_SIZE);
+		if(cur_b->memory == NULL){
+			cur_b->memory = malloc(BLOCK_SIZE);
+			f->total_size += BLOCK_SIZE;
+		}
 
 		size_t cur_sz = BLOCK_SIZE - file_descriptors[fd]->last_byte;
 		if(size < cur_sz) cur_sz = size;
@@ -219,7 +228,10 @@ ufs_write(int fd, const char *buf, size_t size)
 		if(size){
 			if(cur_b->next == NULL){
 				cur_b->next = create_empty_block();
-				cur_b->next->prev = cur_b;
+		if(size + f->size > MAX_FILE_SIZE){
+		ufs_error_code = UFS_ERR_NO_MEM;
+		return -1;
+	}		cur_b->next->prev = cur_b;
 			}
 			cur_b = cur_b->next;
 			file_descriptors[fd]->last_block = cur_b;
@@ -234,7 +246,7 @@ ufs_write(int fd, const char *buf, size_t size)
 ssize_t
 ufs_read(int fd, char *buf, size_t size)
 {
-	if(fd < 0 || fd >= file_descriptor_capacity || file_descriptors[fd] == NULL) {
+	if(check_fd(fd)) {
 		ufs_error_code = UFS_ERR_NO_FILE;
 		return -1;
 	}
@@ -306,7 +318,7 @@ static void delete_fd(int fd) {
 int
 ufs_close(int fd)
 {
-	if(fd < 0 || fd >= file_descriptor_capacity || file_descriptors[fd] == NULL) {
+	if(check_fd(fd)) {
 		ufs_error_code = UFS_ERR_NO_FILE;
 		return -1;
 	}
@@ -363,4 +375,84 @@ ufs_destroy(void)
 	}
 	free(file_list);
 	file_list = NULL;
+}
+
+static void fix_fds(struct file *f) {
+	for(int i = 0; i < file_descriptor_capacity; ++i) {
+		if(file_descriptors[i] && file_descriptors[i]->file == f) {
+			struct block *lb = file_descriptors[i]->last_block;
+
+			struct block *cur_b = f->block_list;
+			while(cur_b != f->last_block) {
+				if(cur_b == lb) {
+					break;
+				}
+				cur_b = cur_b->next;
+			}
+
+			if(cur_b != lb) {
+				file_descriptors[i]->last_block = cur_b;
+				file_descriptors[i]->last_byte = cur_b->occupied;
+			} else if(lb == f->last_block) {
+				if(file_descriptors[i]->last_byte > lb->occupied)
+					file_descriptors[i]->last_byte = lb->occupied;
+			}
+		}
+	}
+}
+
+int
+ufs_resize(int fd, size_t new_size) {
+	if(check_fd(fd)) {
+		ufs_error_code = UFS_ERR_NO_FILE;
+		return -1;
+	}
+
+	if(new_size > MAX_FILE_SIZE){
+		ufs_error_code = UFS_ERR_NO_MEM;
+		return -1;
+	}
+
+	struct file *f = file_descriptors[fd]->file;
+	if(f->total_size < new_size) {
+		struct block *cur_b = f->last_block;
+
+		while(new_size > f->total_size) {
+			if(cur_b->memory == NULL) {
+				cur_b->memory = malloc(BLOCK_SIZE);
+				f->total_size += BLOCK_SIZE;
+			}
+			if(new_size > f->total_size) {
+				if(cur_b->next == NULL){
+					cur_b->next = create_empty_block();
+					cur_b->next->prev = cur_b;
+				}
+				cur_b = cur_b->next;
+				f->last_block = cur_b;
+			}
+		}
+	} else if(f->total_size > new_size) {
+
+		if(f->total_size-BLOCK_SIZE < new_size) {
+			if(f->size > new_size) {
+				f->size = new_size;
+				f->last_block->occupied = f->size % BLOCK_SIZE;
+				fix_fds(f);
+			}
+		} else {
+			while(f->total_size-BLOCK_SIZE > new_size) {
+				struct block *tmp = f->last_block;
+				f->last_block = f->last_block->prev;
+				f->size -= tmp->occupied;
+				f->total_size -= BLOCK_SIZE;
+				block_delete(tmp);
+			}
+			if(f->size > new_size) {
+				f->size = new_size;
+				f->last_block->occupied = f->size % BLOCK_SIZE;
+			}
+			fix_fds(f);
+		}
+	}
+	return 0;
 }

@@ -10,6 +10,8 @@
  */
 
 #define NEED_OPEN_FLAGS
+
+#define NEED_RESIZE
 /**
  * Here you should specify which features do you want to implement
  * via macros: NEED_OPEN_FLAGS and NEED_RESIZE. If you want to
