@@ -38,6 +38,8 @@ struct thread_pool {
 	struct thread_task *queue_front;
 	struct thread_task *queue_back;
 	int tasks_count;
+
+	int close;
 };
 
 int
@@ -57,6 +59,7 @@ thread_pool_new(int max_thread_count, struct thread_pool **pool)
 	(*pool)->queue_back = NULL;
 
 	(*pool)->tasks_count = 0;
+	(*pool)->close = 0;
 
 	pthread_mutex_init(&(*pool)->mutex_queue, NULL);
 	pthread_cond_init(&(*pool)->cond_queue, NULL);
@@ -83,6 +86,11 @@ thread_pool_delete(struct thread_pool *pool)
 		return TPOOL_ERR_HAS_TASKS;
 	}
 
+	pthread_mutex_lock(&pool->mutex_queue);
+    pool->close = 1;
+    pthread_cond_broadcast(&pool->cond_queue);
+    pthread_mutex_unlock(&pool->mutex_queue);
+
 	for(int i = 0; i < pool->thread_count; ++i) {
 		pthread_join(pool->threads[i], NULL);
 	}
@@ -105,6 +113,10 @@ void* _thread_worker(void* arg_pool) {
 		struct thread_task *cur_task = pool->queue_front;
 
 		if(cur_task == NULL) {
+			if (pool->close) {
+                pthread_mutex_unlock(&pool->mutex_queue);
+                break;
+            }
 			pthread_cond_wait(&pool->cond_queue, &pool->mutex_queue);
 			pthread_mutex_unlock(&pool->mutex_queue);
 			continue;
@@ -121,14 +133,14 @@ void* _thread_worker(void* arg_pool) {
 		pthread_mutex_unlock(&pool->mutex_queue);
 
 		__atomic_store_n(&cur_task->status, T_RUNS, __ATOMIC_RELAXED);
-		int tmp = __atomic_load_n(&pool->tasks_count, __ATOMIC_RELAXED);
-		printf("task started %d\n", tmp);
+		//int tmp = __atomic_load_n(&pool->tasks_count, __ATOMIC_RELAXED);
+		// printf("task started %d\n", tmp);
 		cur_task->result = cur_task->function(cur_task->arg);
 
 		pthread_mutex_lock(&cur_task->mutex_status);
 
 		__atomic_store_n(&cur_task->status, T_FINISHED, __ATOMIC_RELAXED);
-		printf("task finished %d\n", tmp);
+		// printf("task finished %d\n", tmp);
 
 		pthread_cond_signal(&cur_task->cond_status);
 		pthread_mutex_unlock(&cur_task->mutex_status);
