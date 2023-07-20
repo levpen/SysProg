@@ -82,6 +82,7 @@ test_push(void)
 	/*
 	 * Re-push.
 	 */
+	
 	unit_check(thread_pool_push_task(p, t) == 0, "pushed again");
 	unit_check(thread_task_join(t, &result) == 0, "joined");
 	unit_check(thread_pool_thread_count(p) == 1, "still one active thread");
